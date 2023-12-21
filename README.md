@@ -1,6 +1,6 @@
 # BUAA 2023 Machine Learning Course Final Project
 
-​本项目为 2023 BUAA 机器学习课程大作业——垃圾邮件识别任务。
+​本项目为 2023 BUAA 机器学习导论大作业——垃圾邮件识别任务。
 
 
 
