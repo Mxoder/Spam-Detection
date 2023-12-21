@@ -35,7 +35,7 @@
 |       test.csv			# 测试集（预测目标）
 |       train.csv			# 训练集
 |
-+---model					# 模型存放路径
++---model				# 模型存放路径
 |       __init__.py
 |
 +---notebook				# jupyter notebook 存放路径
@@ -43,12 +43,12 @@
 |       spam_ham_2.ipynb
 |       spam_ham_3.ipynb
 |
-+---report					# 技术报告存放路径
++---report				# 技术报告存放路径
 |   |   report.md
 |   |
 |   \---resource
 |
-\---src						# 源码文件夹
+\---src					# 源码文件夹
 ```
 
 
