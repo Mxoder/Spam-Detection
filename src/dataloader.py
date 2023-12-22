@@ -2,6 +2,7 @@ import torch
 import pandas as pd
 from loguru import logger
 from torch.utils.data import Dataset
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 from util import detect_encoding
 
