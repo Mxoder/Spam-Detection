@@ -81,6 +81,36 @@ CNB 是标准多项式朴素贝叶斯(MNB)算法的一种改进，比较适用�
 
 CNB 的发明者的研究表明，CNB 的参数估计比 MNB 的参数估计更稳定。
 
+我们五种方案均进行了探索，以 ComplementNB 为例、结合 Optuna 自动调参：
+
+```python
+import optuna
+
+def objective(trial):
+    alpha = trial.suggest_float('alpha', 1e-10, 1.0)
+    model = ComplementNB(alpha=alpha)
+    model.fit(x_train_cnt, y_train)
+    return model.score(x_test_cnt, y_test)
+
+# 创建Optuna优化对象
+study = optuna.create_study(direction='maximize')
+study.optimize(objective, n_trials=300)
+
+# 输出最佳超参数取值
+best_alpha = study.best_params['alpha']
+best_test_value = study.best_value
+print("Best alpha:", best_alpha)
+print("Best test value: ", best_test_value)
+
+# 用最佳超参数训练并预测
+best_cnb = ComplementNB(alpha=best_alpha)
+best_cnb.fit(x_train_cnt, y_train)
+cnb_pred = best_mnb.predict(real_x_cnt)
+
+# 输出
+# ...
+```
+
 
 
 #### 2. SVM
@@ -179,7 +209,11 @@ class DistilBertForSequenceClassification(DistilBertPreTrainedModel):
         self.config = config
 
         self.distilbert = DistilBertModel(config)
+        # pre_classifier 接收来自 bert 的最后一层隐藏状态作为输入，将其映射到更高维度的表示。
+        # 这一层的目的是引入更多的非线性变换和学习能力，以更好地适应具体的分类任务。
         self.pre_classifier = nn.Linear(config.dim, config.dim)
+        # classifier 接收经过 pre_classifier 处理后的特征表示作为输入，将其映射到最终的输出类别数。
+        # out_features 等于类别的数量，如二分类任务中 out_features 为 2。
         self.classifier = nn.Linear(config.dim, config.num_labels)
         self.dropout = nn.Dropout(config.seq_classif_dropout)
 
@@ -219,28 +253,8 @@ def forward(
         pooled_output = self.dropout(pooled_output)  # (bs, dim)
         logits = self.classifier(pooled_output)  # (bs, num_labels)
 
-        loss = None
-        if labels is not None:
-            if self.config.problem_type is None:
-                if self.num_labels == 1:
-                    self.config.problem_type = "regression"
-                elif self.num_labels > 1 and (labels.dtype == torch.long or labels.dtype == torch.int):
-                    self.config.problem_type = "single_label_classification"
-                else:
-                    self.config.problem_type = "multi_label_classification"
-
-            if self.config.problem_type == "regression":
-                loss_fct = MSELoss()
-                if self.num_labels == 1:
-                    loss = loss_fct(logits.squeeze(), labels.squeeze())
-                else:
-                    loss = loss_fct(logits, labels)
-            elif self.config.problem_type == "single_label_classification":
-                loss_fct = CrossEntropyLoss()
-                loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
-            elif self.config.problem_type == "multi_label_classification":
-                loss_fct = BCEWithLogitsLoss()
-                loss = loss_fct(logits, labels)
+        loss_fct = CrossEntropyLoss()
+        loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
 
         if not return_dict:
             output = (logits,) + distilbert_output[1:]
@@ -256,17 +270,164 @@ def forward(
 
 
 
-
-
 #### 3. 技巧
 
 ##### （1）词元阈值过滤
 
-##### （2）假标签法
+首先，创建一个空的 set，用于存储只在 spam 中出现的 token。然后采用 BERT 的 tokenizer，遍历**训练集**中每行内容进行分词，统计**仅存在于 spam 中的 token**。
+
+```python
+# 创建一个空的set用于存储只在spam中出现的token
+spam_only_tokens = set()
+
+# 遍历每行内容进行分词
+for index, row in df.iterrows():
+    content = row["content"]
+    label = row["label"]
+
+    # 将内容进行分词
+    tokens = tokenizer.tokenize(content)
+
+    # 如果是spam，则将所有token添加到spam_only_tokens中
+    if label == "spam":
+        spam_only_tokens.update(tokens)
+    elif label == "ham":
+        # 如果是ham，则检查是否有在spam_only_tokens中的token，有的话从spam_only_tokens中移除
+        for token in tokens:
+            if token in spam_only_tokens:
+                spam_only_tokens.remove(token)
+```
+
+然后采用四类过滤手段：
+
+1. 垃圾词个数高于一定绝对数
 
 
+2. 垃圾词占总长度比值高于一定百分比
+
+
+3. 垃圾词个数低于一定绝对数
+
+
+4. 垃圾词占总长度比值低于一定百分比
+
+注意！这个过滤是**反向置信过滤**！
+
+例如：采用第一种手段（垃圾词个数高于一定绝对数的就判定为 spam），那么**保证不了判定为 spam 的一定是 spam，只能保证不被判定为 spam 的一定为 ham**。通俗来说，就是这是一种**宁愿错杀、不肯放过**的手段，如果在这么严苛的情况下还没被判定为 spam，那么肯定就不是 spam 了。
+
+用这种方法进行预过滤后再继续预测，可以提高一定表现。
+
+##### （2）伪标签法（pseudo label）
+
+伪标签主要思想也比较简单：
+
+1. 在训练集上训练模型，并预测测试集的标签
+2. 取测试集中预测置信度较高的样本（如预测为 1 的概率大于0.95），加入到训练集中
+3. 使用新的训练集重新训练一个模型，并预测测试集的标签
+4. 重复执行 2 和 3 步骤若干次（一至两次即可）
+
+```python
+# 准备已标记和未标记的数据集
+labeled_dataset = ...  # 已标记数据集
+unlabeled_dataset = ...  # 未标记数据集
+
+# 创建数据加载器
+labeled_dataloader = DataLoader(labeled_dataset, batch_size=32, shuffle=True)
+unlabeled_dataloader = DataLoader(unlabeled_dataset, batch_size=32, shuffle=True)
+
+# 初始化模型
+model = MyModel()
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+# 初始训练，使用已标记数据
+model.train()
+for epoch in range(5):  # 初始训练若干轮
+    for inputs, labels in labeled_dataloader:
+        optimizer.zero_grad()
+        outputs = model(inputs)
+        loss = criterion(outputs, labels)
+        loss.backward()
+        optimizer.step()
+
+# 使用伪标签进行训练
+model.train()
+for epoch in range(5):  # 使用伪标签训练若干轮
+    pseudo_labels = []
+    unlabeled_data = []
+    for inputs, _ in unlabeled_dataloader:
+        outputs = model(inputs)
+        pseudo_labels.extend(torch.argmax(outputs, dim=1).tolist())
+        unlabeled_data.append(inputs)
+
+    # 将伪标签与未标记数据合并，形成新的标记数据集
+    pseudo_labeled_dataset = torch.utils.data.TensorDataset(torch.cat(unlabeled_data, dim=0), torch.tensor(pseudo_labels))
+    pseudo_labeled_dataloader = DataLoader(pseudo_labeled_dataset, batch_size=32, shuffle=True)
+
+    for (inputs, labels), (pseudo_inputs, pseudo_labels) in zip(labeled_dataloader, pseudo_labeled_dataloader):
+        optimizer.zero_grad()
+        labeled_outputs = model(inputs)
+        pseudo_labeled_outputs = model(pseudo_inputs)
+        labeled_loss = criterion(labeled_outputs, labels)
+        pseudo_labeled_loss = criterion(pseudo_labeled_outputs, pseudo_labels)
+        loss = labeled_loss + pseudo_labeled_loss
+        loss.backward()
+        optimizer.step()
+```
 
 <div style="page-break-before:always;"></div>
 
 ## 四、Optuna 自动调参
+
+Optuna 是一个强大的自动化超参数优化框架。它使用了一种称为“序列化和停止准则”的技术，通过迭代地评估不同的超参数组合来寻找最佳的模型性能。
+
+相比于传统的 Grid Search 结合 k 折交叉验证，Optuna 性能更好、更高效，因此我们普遍采用了 Optuna 进行调参。
+
+Optuna 的使用重点在于 `objective` 函数，定义待搜索的超参数空间，一个 Bert 的调参示例如下：
+
+```python
+# 定义目标函数，供 Optuna 调用
+import torch.optim as optim
+from transformers import AutoModelForSequenceClassification
+
+logging_steps = 100
+
+def objective(trial):
+    # 定义超参数搜索空间
+    lr = trial.suggest_float("lr", 1e-5, 1e-2, log=True)
+    weight_decay = trial.suggest_float('weight_decay', 1e-3, 1e-1, log=True)
+    eps = trial.suggest_float('eps', 1e-9, 1e-6, log=True)
+    params = {
+        'lr': lr,
+        'weight_decay': weight_decay,
+        'eps': eps,
+    }
+
+    model = AutoModelForSequenceClassification.from_pretrained(
+        model_path,
+    )
+    optimizer = optim.AdamW(model.parameters(), **params)
+
+    global_step = 0
+    model.to(device)
+
+    model.train()
+    for batch in tqdm(tr_loader):
+        if device == 'cuda':
+            batch = {k: v.cuda() for k, v in batch.items()}
+        optimizer.zero_grad()
+        output = model(**batch)
+        output.loss.backward()
+        optimizer.step()
+
+        if (global_step + 1) % logging_steps == 0:
+            print(f'\nsteps: {global_step}, loss: {output.loss.item()}', flush=True)
+        global_step += 1
+
+    # 进行评估
+    acc = evaluate(model, val_ds, val_loader)
+    print(f'\naccuracy: {acc}', flush=True)
+
+    return acc  # Optuna 追求最大化目标
+```
 
