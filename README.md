@@ -34,7 +34,7 @@
 .
 |   LICENSE
 |   README.md
-|   requirements.txt	# 项目依赖
+|   requirements.txt	                # 项目依赖
 |
 +---data
 |       test.csv			# 测试集（预测目标）
@@ -48,17 +48,17 @@
 |
 +---report				# 技术报告存放路径
 |   |   report.md
-|   |   report.pptx		# 展示报告
+|   |   report.pptx		        # 展示报告
 |   |
 |   \---resource
 |
 \---src					# 源码文件夹
-        config.py		# 项目配置
-        dataloader.py	# 数据加载
-        main.py			# 主入口
-        preprocess.py	# 数据分析与预处理
-        train.py		# 训练
-        util.py			# 其他工具
+        config.py		        # 项目配置
+        dataloader.py	                # 数据加载
+        main.py			        # 主入口
+        preprocess.py	                # 数据分析与预处理
+        train.py		        # 训练
+        util.py			        # 其他工具
 ```
 
 
