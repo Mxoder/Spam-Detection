@@ -104,7 +104,10 @@ BERT（Bidirectional Encoder Representations from Transformers）是一种基于
 
 现如今，BERT 在自然语言处理领域中有广泛的应用，包括文本分类、命名实体识别、情感分析、问答系统等任务。它在这些任务中展现出了优异的性能，是当前最为广泛应用的模型之一。因此，我们重点考虑应用 BERT 来解决本问题。
 
+我们还尝试了许多变体，其中最出色的是微软的 [DeBERTa](https://huggingface.co/microsoft/deberta-v3-base)，它有两大关键特性：
 
+- 自注意力解耦机制：用 2 个向量分别表示 content 和 position，即 word 本身的文本内容和位置。word 之间的注意力权重则使用 word 内容之间和位置之间的解耦矩阵
+- 增强的掩码解码器：传统解耦注意机制已经考虑了上下文单词的内容和**相对位置**，但没有考虑这些单词的**绝对位置**，DeBERTa 解决了这一问题
 
 <div style="page-break-before:always;"></div>
 
@@ -126,7 +129,134 @@ BERT（Bidirectional Encoder Representations from Transformers）是一种基于
 
 #### 1. 超参数经验
 
+##### （1）优化器
+
+优化器我们最终采用 AdamW。AdamW 是对 Adam 算法的改进版本，它在 Adam 的基础上引入了权重衰减（weight decay）机制，用于控制参数的正则化。通过引入权重衰减，AdamW 可以更好地约束模型的复杂度，防止过拟合。
+
+##### （2）学习率
+
+学习率决定了每次参数更新的步长，是训练过程中的重要超参数。根据已有经验，对于 BERT 通常会选择较小的学习率（1e-5 ~ 5e-5）。较小的学习率可以使模型更稳定地收敛，并且能够避免梯度爆炸或梯度消失的问题。
+
+##### （3）学习率变化策略
+
+常见的学习率策略有 constant，cosine 等。constant 策略使用固定的学习率进行训练，适用于简单的任务和数据集。而 cosine 策略会在训练过程中逐渐降低学习率，在后期阶段，学习率会非常小，这有助于模型更好地收敛到最优解。在我们的尝试中，对于本任务采用 constant 策略即可。
+
+##### （4）Loss
+
+Loss 函数用于衡量模型预测结果与真实标签之间的差异，最经典的就是普通交叉熵。在数据分析阶段，我们知道了本任务的数据集是不均衡的，因此可以尝试不同的 Loss 函数来处理。
+
+普通交叉熵损失函数适用于一般情况，它对所有样本平等对待。带 $α$ 的交叉熵损失函数可用于处理正负样本不均衡，通过调节 $α$ 参数来控制正负样本的重要性。而 Focal Loss 则可以更好地处理难易样本不均衡，它通过引入调制因子来增加难样本的权重，从而更关注难以分类的样本。
+
+根据我们的试验，由于最终评判标准为准确率，一味增大难例判别其实会影响整体结果，最终采用普通的交叉熵，也取得了优异的结果。
+
+##### （5）DropOut
+
+Dropout是一种常用的正则化技术，在训练过程中随机丢弃一部分神经元，以减少过拟合。
+
+对于大模型，如 BERT，较大的 Dropout 参数值（例如0.5）可以显著减少过拟合风险；而对于小模型，可以考虑减小或去除 Dropout 操作，以避免信息损失。
+
+##### （6）训练参数
+
+在微调 BERT 模型时，一般有全参训练或仅训练分类器头两种方式。全参训练是指对整个 BERT 模型进行微调，包括预训练得到的权重。这种方式通常适用于数据集较大、任务复杂的情况。而仅训练分类器头是指固定 BERT 模型的权重，只训练分类器层的参数。这种方式适用于数据集较小、任务相对简单的情况，可以减少计算资源的消耗。
+
+根据我们的试验，最终采用了全参训练。
+
+除了以上提到的超参数外，还有其他一些超参数也需要考虑。例如批量大小（batch size），它决定了每次迭代中训练的样本数量，需要根据显存大小和训练速度进行合理选择。训练轮数（epochs）指的是训练过程中完整遍历数据集的次数，过少的轮数可能导致欠拟合，过多的轮数可能导致过拟合。
+
+
+
 #### 2. 自定义任务头
+
+![](resource\分类器头.png)
+
+我们定义一个分类器头，用于适配下游二分类任务。
+
+```python
+class DistilBertForSequenceClassification(DistilBertPreTrainedModel):
+    def __init__(self, config: PretrainedConfig):
+        super().__init__(config)
+        self.num_labels = config.num_labels
+        self.config = config
+
+        self.distilbert = DistilBertModel(config)
+        self.pre_classifier = nn.Linear(config.dim, config.dim)
+        self.classifier = nn.Linear(config.dim, config.num_labels)
+        self.dropout = nn.Dropout(config.seq_classif_dropout)
+
+        # Initialize weights and apply final processing
+        self.post_init()
+```
+
+其中 forward 如下：
+
+```python
+def forward(
+        self,
+        input_ids: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        head_mask: Optional[torch.Tensor] = None,
+        inputs_embeds: Optional[torch.Tensor] = None,
+        labels: Optional[torch.LongTensor] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+    ) -> Union[SequenceClassifierOutput, Tuple[torch.Tensor, ...]]:
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+
+        distilbert_output = self.distilbert(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            head_mask=head_mask,
+            inputs_embeds=inputs_embeds,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
+        hidden_state = distilbert_output[0]  # (bs, seq_len, dim)
+        pooled_output = hidden_state[:, 0]  # (bs, dim)
+        pooled_output = self.pre_classifier(pooled_output)  # (bs, dim)
+        pooled_output = nn.ReLU()(pooled_output)  # (bs, dim)
+        pooled_output = self.dropout(pooled_output)  # (bs, dim)
+        logits = self.classifier(pooled_output)  # (bs, num_labels)
+
+        loss = None
+        if labels is not None:
+            if self.config.problem_type is None:
+                if self.num_labels == 1:
+                    self.config.problem_type = "regression"
+                elif self.num_labels > 1 and (labels.dtype == torch.long or labels.dtype == torch.int):
+                    self.config.problem_type = "single_label_classification"
+                else:
+                    self.config.problem_type = "multi_label_classification"
+
+            if self.config.problem_type == "regression":
+                loss_fct = MSELoss()
+                if self.num_labels == 1:
+                    loss = loss_fct(logits.squeeze(), labels.squeeze())
+                else:
+                    loss = loss_fct(logits, labels)
+            elif self.config.problem_type == "single_label_classification":
+                loss_fct = CrossEntropyLoss()
+                loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+            elif self.config.problem_type == "multi_label_classification":
+                loss_fct = BCEWithLogitsLoss()
+                loss = loss_fct(logits, labels)
+
+        if not return_dict:
+            output = (logits,) + distilbert_output[1:]
+            return ((loss,) + output) if loss is not None else output
+
+        return SequenceClassifierOutput(
+            loss=loss,
+            logits=logits,
+            hidden_states=distilbert_output.hidden_states,
+            attentions=distilbert_output.attentions,
+        )
+```
+
+
+
+
 
 #### 3. 技巧
 
