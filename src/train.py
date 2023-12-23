@@ -1,6 +1,7 @@
 import torch
 import optuna
 import optuna.logging
+from torch import nn
 from tqdm import tqdm
 import torch.optim as optim
 from torch.utils.data import DataLoader
@@ -13,16 +14,16 @@ from config import *
 from util import *
 from dataloader import *
 
-
 # 设置 Optuna 的日志级别为 WARNING，即 WARNING 以上才输出
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-
 """
 Naive Bayes
 """
+
+
 def naive_bayes_train() -> ComplementNB:
     # Optuna 调参
     def objective(trial):
@@ -30,7 +31,7 @@ def naive_bayes_train() -> ComplementNB:
         model = ComplementNB(alpha=alpha)
         model.fit(x_train_cnt, y_train)
         return model.score(x_test_cnt, y_test)
-    
+
     # 读取数据
     df_train = read_data_cleaned(data_train_path)
     df_test = read_data_cleaned(data_test_path)
@@ -65,15 +66,179 @@ def naive_bayes_train() -> ComplementNB:
 SVM
 """
 
-
-
-
 """
 LSTM
 """
 
 
+# 定义LSTM模型
+class LSTMClassifier(nn.Module):
+    def __init__(self, input_size, hidden_size, output_size):
+        super(LSTMClassifier, self).__init__()
+        self.lstm = nn.LSTM(input_size, hidden_size, batch_first=True)
+        self.fc = nn.Linear(hidden_size, output_size)
+        self.sigmoid = nn.Sigmoid()
 
+    def forward(self, x):
+        out, _ = self.lstm(x.unsqueeze(1))  # 添加一个维度
+        out = self.fc(out[:, -1, :])
+        out = self.sigmoid(out)
+        return out
+
+
+def lstm_train():
+    # 读取数据
+    df_train = read_data_cleaned(data_train_path)
+    df_test = read_data_cleaned(data_test_path)
+
+    x, y = split_content_label(df_train)
+    X_train, X_val, y_train, y_val = train_test_split(x, y, test_size=0.2)
+
+    # 使用CountVectorizer将文本转换为词袋模型
+    vectorizer = CountVectorizer()
+    X_train_vec = vectorizer.fit_transform(X_train)
+    X_val_vec = vectorizer.transform(X_val)
+
+    # 转换为PyTorch Tensor
+    X_train_tensor = torch.tensor(X_train_vec.toarray(), dtype=torch.float32)
+    y_train_tensor = torch.tensor(y_train.map({'ham': 0, 'spam': 1}).values, dtype=torch.float32)
+    X_val_tensor = torch.tensor(X_val_vec.toarray(), dtype=torch.float32)
+    y_val_tensor = torch.tensor(y_val.map({'ham': 0, 'spam': 1}).values, dtype=torch.float32)
+
+    # 创建数据加载器
+    train_dataset = LSTMDataset(X_train_tensor, y_train_tensor)
+    train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
+
+    # 初始化模型、损失函数和优化器
+    input_size = X_train_tensor.shape[1]
+    hidden_size = 128
+    output_size = 1
+    model = LSTMClassifier(input_size, hidden_size, output_size)
+    criterion = nn.BCELoss()
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+    # 训练模型
+    num_epochs = 10
+    for epoch in range(num_epochs):
+        model.train()
+        total_loss = 0
+        for batch_X, batch_y in tqdm(train_loader, desc=f'Epoch {epoch + 1}/{num_epochs}'):
+            optimizer.zero_grad()
+            output = model(batch_X)
+            loss = criterion(output.squeeze(), batch_y)
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item()
+
+        print(f'Epoch {epoch + 1}/{num_epochs}, Loss: {total_loss / len(train_loader)}')
+
+        # 在验证集上评估模型
+        model.eval()
+        with torch.no_grad():
+            val_output = model(X_val_tensor)
+            val_loss = criterion(val_output.squeeze(), y_val_tensor)
+            val_preds = (val_output.squeeze() >= 0.5).float()
+            accuracy = torch.sum(val_preds == y_val_tensor).item() / len(y_val_tensor)
+
+        print(f'Validation Loss: {val_loss.item()}, Accuracy: {accuracy}')
+
+    def objective(trial):
+        # 定义超参数搜索空间
+        hidden_size = trial.suggest_int('hidden_size', 32, 256)
+        learning_rate = trial.suggest_loguniform('learning_rate', 1e-5, 1e-2)
+
+        # 初始化模型
+        model = LSTMClassifier(input_size, hidden_size, output_size)
+        criterion = nn.BCELoss()
+        optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+
+        # 训练模型
+        num_epochs = 10
+        for epoch in range(num_epochs):
+            model.train()
+            total_loss = 0
+            for batch_X, batch_y in train_loader:
+                optimizer.zero_grad()
+                output = model(batch_X)
+                loss = criterion(output.squeeze(), batch_y)
+                loss.backward()
+                optimizer.step()
+                total_loss += loss.item()
+
+            # 在每个epoch结束后记录损失
+            trial.report(total_loss, epoch)
+
+            # 判断是否应该提前停止训练
+            if trial.should_prune():
+                raise optuna.exceptions.TrialPruned()
+
+        # 返回验证集上的准确度作为目标值
+        model.eval()
+        with torch.no_grad():
+            val_output = model(X_val_tensor)
+            val_loss = criterion(val_output.squeeze(), y_val_tensor)
+            val_preds = (val_output.squeeze() >= 0.5).float()
+            accuracy = torch.sum(val_preds == y_val_tensor).item() / len(y_val_tensor)
+
+        return accuracy
+
+    study = optuna.create_study(direction='maximize')
+    study.optimize(objective, n_trials=20)
+
+    # 打印最佳超参数和目标值
+    print('Best trial:')
+    trial = study.best_trial
+
+    print('Value: {}'.format(trial.value))
+    print('Params: ')
+    for key, value in trial.params.items():
+        print('{}: {}'.format(key, value))
+
+    # 使用最佳超参数重新训练模型
+    best_hidden_size = study.best_params['hidden_size']
+    best_learning_rate = study.best_params['learning_rate']
+
+    # 初始化模型
+    best_model = LSTMClassifier(input_size, best_hidden_size, output_size)
+    best_optimizer = optim.Adam(best_model.parameters(), lr=best_learning_rate)
+    best_criterion = nn.BCELoss()
+
+    # 训练模型
+    num_epochs = 10
+    for epoch in range(num_epochs):
+        best_model.train()
+        total_loss = 0
+        for batch_X, batch_y in train_loader:
+            best_optimizer.zero_grad()
+            output = best_model(batch_X)
+            loss = best_criterion(output.squeeze(), batch_y)
+            loss.backward()
+            best_optimizer.step()
+            total_loss += loss.item()
+
+        print(f'Epoch {epoch + 1}/{num_epochs}, Loss: {total_loss / len(train_loader)}')
+
+    real_x = df_test['content']
+
+    # 在测试集上进行预测
+    real_x_vec = vectorizer.transform(real_x)
+    real_x_tensor = torch.tensor(real_x_vec.toarray(), dtype=torch.float32)
+
+    best_model.eval()
+    with torch.no_grad():
+        test_output = best_model(real_x_tensor)
+        test_preds = (test_output.squeeze() >= 0.5).float()
+
+    # 将预测结果转换为 DataFrame
+    df_result = pd.DataFrame({'content': real_x, 'prediction': test_preds.numpy()})
+
+    # 如果 prediction 列的值为 1，则代表 spam；否则，为 ham
+    df_result['label'] = df_result['prediction'].apply(lambda x: 'spam' if x == 1 else 'ham')
+    df_result = df_result[['content', 'label']]
+
+    with open('submission_lstm.txt', 'w', encoding='utf-8') as f:
+        for res in df_result['label']:
+            f.write(res + '\n')
 
 
 """
@@ -152,7 +317,6 @@ def bert_train():
                            return_tensors='pt')
         inputs['labels'] = torch.tensor(labels)
         return inputs
-    
 
     def objective(trial):
         # 定义超参数搜索空间
@@ -191,11 +355,10 @@ def bert_train():
         print(f'\naccuracy: {acc}', flush=True)
 
         return acc  # Optuna 追求最大化目标
-    
 
     # 读取数据并划分训练集，验证集
     ds = BertDataset(data_train_path)
-    tr_ds, val_ds = random_split(ds, lengths=[0.8, 0.2])    # train_dataset, valid_dataset
+    tr_ds, val_ds = random_split(ds, lengths=[0.8, 0.2])  # train_dataset, valid_dataset
 
     # 加载模型
     tokenizer, model = load_bert(distilbert_path)

@@ -1,9 +1,5 @@
 # <center>机器学习大作业报告 - 垃圾邮件识别</center>
 
-
-
-
-
 [TOC]
 
 ## 最终结果
@@ -12,8 +8,6 @@
 
 - 准确率：99.65%
 - 排名：1
-
-
 
 ## 团队分工
 
@@ -26,15 +20,11 @@
 
 ## 一、问题介绍
 
-
-
 <div style="page-break-before:always;"></div>
 
 ## 二、方法描述
 
 ### （一）数据分析与预处理
-
-
 
 ### （二）模型探索
 
@@ -43,6 +33,7 @@
 一般有五种常用的朴素贝叶斯算法：
 
 ##### 1.1 BernoulliNB - 伯努利朴素贝叶斯
+
 模型适用于多元伯努利分布，即每个特征都是二值变量，如果不是二值变量，该模型可以先对变量进行二值化。
 
 在文档分类中特征是单词是否出现，如果该单词在某文件中出现了即为 1，否则为 0。
@@ -51,28 +42,28 @@
 
 BernoulliNB 可能在一些数据集上表现得更好，特别是那些更短的文档。如果时间允许，一般会对两个模型都进行评估。
 
-
 ##### 1.2 CategoricalNB - 类朴素贝叶斯
+
 对分类分布的数据实施分类朴素贝叶斯算法，专用于离散数据集， 它假定由索引描述的每个特征都有其自己的分类分布。
 
 对于训练集中的每个特征 $X$，CategoricalNB 估计以类 $y$ 为条件的 $X$ 的每个特征 $i$ 的分类分布。
 
 样本的索引集定义为 $J = 1, …, m$，其中 $m$ 为样本数。
 
-
 ##### 1.3 GaussianNB - 高斯朴素贝叶斯
+
 特征变量是连续变量，符合高斯分布，比如说人的身高，物体的长度。这种模型假设特征符合高斯分布。
 
-
 ##### 1.4 MultinomialNB - 多项式朴素贝叶斯
+
 特征变量是离散变量，符合多项分布，在文档分类中特征变量体现在一个单词出现的次数，或者是单词的 TF-IDF 值等。
 
 不支持负数，所以输入变量特征的时候，不用 `StandardScaler` 进行标准化数据，可以使用 `MinMaxScaler` 进行归一化。
 
 这个模型假设特征复合多项式分布，是一种非常典型的文本分类模型，模型内部带有平滑参数 `alpha`。
 
-
 ##### 1.5 ComplementNB - 补充朴素贝叶斯
+
 是 MultinomialNB 模型的一个变种，实现了补码朴素贝叶斯(CNB)算法。
 
 CNB 是标准多项式朴素贝叶斯(MNB)算法的一种改进，比较适用于不平衡的数据集，在文本分类上的结果通常比 MultinomialNB 模型好。
@@ -111,15 +102,46 @@ cnb_pred = best_mnb.predict(real_x_cnt)
 # ...
 ```
 
-
-
 #### 2. SVM
-
-
 
 #### 3. LSTM
 
+长短时记忆网络（Long Short-Term Memory，LSTM）是一种递归神经网络（Recurrent Neural Network，RNN）的变体，用于处理序列数据。LSTM 的关键特点是能够捕捉长期依赖关系，避免了传统 RNN 在训练过程中遇到的梯度消失或梯度爆炸的问题。
 
+##### 3.1 LSTM基本原理
+
+LSTM 包含一个单元（cell），该单元中包含三个门（gates）：遗忘门（forget gate）、输入门（input gate）和输出门（output gate）。这三个门的作用如下：
+
+- 遗忘门：决定是否丢弃过去的记忆。
+- 输入门：决定更新当前时刻的记忆。
+- 输出门：决定输出的记忆。
+
+具体而言，对于每个时刻 t，LSTM 单元的状态（cell state）$C_t$ 和输出（output）$h_t$ 的计算如下：
+
+1. 遗忘门：$f_t = \sigma(W_f \cdot [h_{t-1}, x_t] + b_f)$
+2. 输入门：$i_t = \sigma(W_i \cdot [h_{t-1}, x_t] + b_i)$，$\tilde{C}_t = \tanh(W_C \cdot [h_{t-1}, x_t] + b_C)$
+3. 更新记忆：$C_t = f_t \cdot C_{t-1} + i_t \cdot \tilde{C}_t$
+4. 输出门：$o_t = \sigma(W_o \cdot [h_{t-1}, x_t] + b_o)$，$h_t = o_t \cdot \tanh(C_t)$
+
+其中，$[h_{t-1}, x_t]$ 表示将上一时刻的输出和当前时刻的输入连接起来，$W_f, b_f, W_i, b_i, W_C, b_C, W_o, b_o$ 是需要学习的参数，$\sigma$ 是 sigmoid 函数，$\tanh$ 是双曲正切函数。
+
+##### 3.2 应用于垃圾短信识别的LSTM模型
+
+在垃圾短信识别任务中，可以将每条短信看作一个序列，其中每个单词或字符作为序列的一个时间步。以下是本作业中垃圾短信分类的 LSTM 模型定义：
+
+```python
+class LSTMClassifier(nn.Module):
+    def __init__(self, input_size, hidden_size, output_size):
+        super(LSTMClassifier, self).__init__()
+        self.lstm = nn.LSTM(input_size, hidden_size, batch_first=True)
+        self.fc = nn.Linear(hidden_size, output_size)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        # ...
+```
+
+上述模型包括一个嵌入层（Embedding）、一个LSTM层和一个全连接层。嵌入层将文本转换为密集向量表示，LSTM层用于捕捉序列信息，最后的全连接层输出二分类的结果。
 
 #### 4. BERT
 
@@ -145,16 +167,113 @@ BERT（Bidirectional Encoder Representations from Transformers）是一种基于
 
 ### （一）Naive Bayes
 
-
-
 ### （二）SVM
-
-
 
 ### （三）LSTM
 
+#### 1. 无调优测试
 
+定义一个 LSTM 分类模型（见**二、方法描述** -> **（二）模型探索** -> $3.2$），并使用训练集进行训练。在训练过程中，我们记录每个 epoch 的损失，并在验证集上评估模型的性能。
 
+```python
+# 创建数据加载器
+train_dataset = LSTMDataset(X_train_tensor, y_train_tensor)
+train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
+
+# 初始化模型、损失函数和优化器
+input_size = X_train_tensor.shape[1]
+hidden_size = 128
+output_size = 1
+model = LSTMClassifier(input_size, hidden_size, output_size)
+criterion = nn.BCELoss()
+optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+# 训练模型
+num_epochs = 10
+for epoch in range(num_epochs):
+    model.train()
+    total_loss = 0
+    for batch_X, batch_y in tqdm(train_loader, desc=f'Epoch {epoch + 1}/{num_epochs}'):
+        optimizer.zero_grad()
+        output = model(batch_X)
+        loss = criterion(output.squeeze(), batch_y)
+        loss.backward()
+        optimizer.step()
+        total_loss += loss.item()
+
+    print(f'Epoch {epoch + 1}/{num_epochs}, Loss: {total_loss / len(train_loader)}')
+
+    # 在验证集上评估模型
+    model.eval()
+    with torch.no_grad():
+        val_output = model(X_val_tensor)
+        val_loss = criterion(val_output.squeeze(), y_val_tensor)
+        val_preds = (val_output.squeeze() >= 0.5).float()
+        accuracy = torch.sum(val_preds == y_val_tensor).item() / len(y_val_tensor)
+
+    print(f'Validation Loss: {val_loss.item()}, Accuracy: {accuracy}')
+```
+
+#### 2. 超参数调优
+
+本模型较为简单，需要进行调优的超参数包括 **学习率** 和 **隐藏层神经元个数** 。在每个 epoch 结束后，我们记录损失，并根据这些信息搜索最佳的学习率和隐藏层神经元个数（具体搜索方式在**四、Optuna 自动调参**进行说明）：
+```python
+study = optuna.create_study(direction='maximize')
+study.optimize(objective, n_trials=20)
+
+trial = study.best_trial
+# 使用最佳超参数重新训练模型
+best_hidden_size = study.best_params['hidden_size']
+best_learning_rate = study.best_params['learning_rate']
+
+# 初始化模型
+best_model = LSTMClassifier(input_size, best_hidden_size, output_size)
+best_optimizer = optim.Adam(best_model.parameters(), lr=best_learning_rate)
+best_criterion = nn.BCELoss()
+
+# 训练模型
+num_epochs = 10
+for epoch in range(num_epochs):
+    best_model.train()
+    total_loss = 0
+    for batch_X, batch_y in train_loader:
+        best_optimizer.zero_grad()
+        output = best_model(batch_X)
+        loss = best_criterion(output.squeeze(), batch_y)
+        loss.backward()
+        best_optimizer.step()
+        total_loss += loss.item()
+
+    print(f'Epoch {epoch + 1}/{num_epochs}, Loss: {total_loss / len(train_loader)}')
+```
+
+#### 3. 结果输出
+
+最后，使用重新训练的模型在测试集上进行预测，并将结果输出到文件中。
+```python
+real_x = df_test['content']
+
+# 在测试集上进行预测
+real_x_vec = vectorizer.transform(real_x)
+real_x_tensor = torch.tensor(real_x_vec.toarray(), dtype=torch.float32)
+
+best_model.eval()
+with torch.no_grad():
+    test_output = best_model(real_x_tensor)
+    test_preds = (test_output.squeeze() >= 0.5).float()
+
+# 将预测结果转换为 DataFrame
+df_result = pd.DataFrame({'content': real_x, 'prediction': test_preds.numpy()})
+
+# 如果 prediction 列的值为 1，则代表 spam；否则，为 ham
+df_result['label'] = df_result['prediction'].apply(lambda x: 'spam' if x == 1 else 'ham')
+df_result = df_result[['content', 'label']]
+
+# 将结果写入文件
+with open('submission_lstm.txt', 'w', encoding='utf-8') as f:
+    for res in df_result['label']:
+        f.write(res + '\n')
+```
 ### （四）BERT
 
 #### 1. 超参数经验
@@ -192,8 +311,6 @@ Dropout是一种常用的正则化技术，在训练过程中随机丢弃一部�
 根据我们的试验，最终采用了全参训练。
 
 除了以上提到的超参数外，还有其他一些超参数也需要考虑。例如批量大小（batch size），它决定了每次迭代中训练的样本数量，需要根据显存大小和训练速度进行合理选择。训练轮数（epochs）指的是训练过程中完整遍历数据集的次数，过少的轮数可能导致欠拟合，过多的轮数可能导致过拟合。
-
-
 
 #### 2. 自定义任务头
 
@@ -268,8 +385,6 @@ def forward(
         )
 ```
 
-
-
 #### 3. 技巧
 
 ##### （1）词元阈值过滤
@@ -301,14 +416,8 @@ for index, row in df.iterrows():
 然后采用四类过滤手段：
 
 1. 垃圾词个数高于一定绝对数
-
-
 2. 垃圾词占总长度比值高于一定百分比
-
-
 3. 垃圾词个数低于一定绝对数
-
-
 4. 垃圾词占总长度比值低于一定百分比
 
 注意！这个过滤是**反向置信过滤**！
@@ -430,4 +539,3 @@ def objective(trial):
 
     return acc  # Optuna 追求最大化目标
 ```
-

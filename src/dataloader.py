@@ -64,3 +64,17 @@ class BertDataset(Dataset):
 
     def __len__(self):
         return len(self.data)
+
+"""
+自定义数据集（for lstm）
+"""
+class LSTMDataset(Dataset):
+    def __init__(self, features, labels):
+        self.features = features
+        self.labels = labels
+
+    def __len__(self):
+        return len(self.features)
+
+    def __getitem__(self, idx):
+        return self.features[idx], self.labels[idx]

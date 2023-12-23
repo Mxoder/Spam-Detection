@@ -2,7 +2,7 @@ from loguru import logger
 
 from config import *
 from preprocess import preprocess
-from train import naive_bayes_train
+from train import naive_bayes_train, lstm_train
 from train import bert_train
 
 
@@ -21,6 +21,7 @@ def svm():
 # LSTM
 def lstm():
     logger.info('Model: LSTM')
+    lstm_train()
     # todo
 
 
@@ -39,7 +40,7 @@ def main():
     logger.info('Training model...')
     # naive_bayes()
     # svm()
-    # lstm()
+    lstm()
     bert()
 
     logger.info(f'Training completed. The predictions have been saved to {submission_path}.')
