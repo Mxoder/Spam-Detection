@@ -20,7 +20,14 @@
 
 ## 一、问题介绍
 
-<div style="page-break-before:always;"></div>
+<div style="page-break-before:always;">
+根据短信内容判断短信是否为垃圾短信。
+
+数据规模： 3537条训练数据，2035条测试数据。
+
+输出格式： Submission.zip -submission.txt
+
+以测试集数据为顺序，每一行输出短信是否为垃圾短信。 spam：是垃圾短信；ham：不是垃圾短信。</div>
 
 ## 二、方法描述
 
@@ -104,6 +111,57 @@ cnb_pred = best_mnb.predict(real_x_cnt)
 
 #### 2. SVM
 
+支持向量机（Support Vector Machine，SVM）是一种监督学习算法，常用于分类任务。它通过找到一个最优的超平面来实现分类，使得不同类别间的间隔最大化，并且依赖于支持向量（数据集中距离超平面最近的样本点）。SVM具有较好的泛化能力和鲁棒性，适用于高维空间和非线性问题。在应用方面，SVM广泛用于文本分类、图像识别等任务，是机器学习中重要的工具之一。
+
+##### 2.1 SVM基本原理
+
+支持向量机通过寻找一个最优的超平面来实现分类，这个最优超平面不但可以将样本中的正例和负例区分开，而且能够使正负例样本距离超平面的间隔最大化。
+
+影响 SVM 模型性能的参数主要有两个，一个是惩罚因子 C，较小的 C 值会容忍更多的误分类样本，对提高模型的抗噪能力有一定帮助；另一个是核函数 kernel，核函数决定了将样本映射到高维空间的方式，利用核函数可以直接在原低维空间对任意两个样本做点积运算，显著降低了模型训练的计算开销。
+
+##### 2.2 应用于垃圾短信分类的SVM
+
+在垃圾短信分类任务中，全体短信的集合可被划分为“垃圾短信”和“非垃圾短信”两类。SVM试图寻找能够划分两类短信样本的超平面，从而达到“识别垃圾短信”的目的，其原理如下图所示：
+
+![](resource\svm原理简图.png)
+
+下面是用于垃圾短信分类的 SVM 的代码示例，结合了 Optuna 自动调参：
+
+```python
+import optuna
+
+def objective(trial):
+    C = trial.suggest_loguniform('C', 0.1, 10.0)
+    kernel = trial.suggest_categorical('kernel', ['linear', 'rbf', 'poly', 'sigmoid'])
+    model = svm.SVC(C=C, kernel=kernel)
+    model.fit(x_train_cnt, y_train)
+    y_pred = model.predict(x_test_cnt)
+    accuracy = accuracy_score(y_test, y_pred)
+    return accuracy
+
+# 创建Optuna优化对象
+study = optuna.create_study(direction='maximize')
+study.optimize(objective, n_trials=300)
+
+# 输出最佳超参数取值
+best_C = study.best_params['C']
+best_kernel = study.best_params['kernel']
+best_test_value = study.best_value
+print('best C: ', best_C)
+print('best kernel: ', best_kernel)
+print('best test value: ', best_test_value)
+
+# 用最佳超参数训练并预测
+best_svm = svm.SVC(C=best_C, kernel=best_kernel)
+best_svm.fit(x_train_cnt, y_train)
+svm_pred = best_svm.predict(real_x_cnt)
+
+# 输出
+# ...
+```
+
+
+
 #### 3. LSTM
 
 长短时记忆网络（Long Short-Term Memory，LSTM）是一种递归神经网络（Recurrent Neural Network，RNN）的变体，用于处理序列数据。LSTM 的关键特点是能够捕捉长期依赖关系，避免了传统 RNN 在训练过程中遇到的梯度消失或梯度爆炸的问题。
@@ -167,7 +225,76 @@ BERT（Bidirectional Encoder Representations from Transformers）是一种基于
 
 ### （一）Naive Bayes
 
+训练朴素贝叶斯模型，结合 Optuna 自动调参：
+
+```python
+import optuna
+
+def objective(trial):
+    alpha = trial.suggest_float('alpha', 1e-10, 1.0)
+    model = ComplementNB(alpha=alpha)
+    model.fit(x_train_cnt, y_train)
+    return model.score(x_test_cnt, y_test)
+
+# 创建Optuna优化对象
+study = optuna.create_study(direction='maximize')
+study.optimize(objective, n_trials=300)
+
+# 输出最佳超参数取值
+best_alpha = study.best_params['alpha']
+best_test_value = study.best_value
+print("Best alpha:", best_alpha)
+print("Best test value: ", best_test_value)
+
+# 用最佳超参数训练并预测
+best_cnb = ComplementNB(alpha=best_alpha)
+best_cnb.fit(x_train_cnt, y_train)
+cnb_pred = best_mnb.predict(real_x_cnt)
+
+# 输出
+# ...
+```
+
+
+
 ### （二）SVM
+
+训练支持向量机模型，结合 Optuna 自动调参：
+
+```python
+import optuna
+
+def objective(trial):
+    C = trial.suggest_loguniform('C', 0.1, 10.0)
+    kernel = trial.suggest_categorical('kernel', ['linear', 'rbf', 'poly', 'sigmoid'])
+    model = svm.SVC(C=C, kernel=kernel)
+    model.fit(x_train_cnt, y_train)
+    y_pred = model.predict(x_test_cnt)
+    accuracy = accuracy_score(y_test, y_pred)
+    return accuracy
+
+# 创建Optuna优化对象
+study = optuna.create_study(direction='maximize')
+study.optimize(objective, n_trials=300)
+
+# 输出最佳超参数取值
+best_C = study.best_params['C']
+best_kernel = study.best_params['kernel']
+best_test_value = study.best_value
+print('best C: ', best_C)
+print('best kernel: ', best_kernel)
+print('best test value: ', best_test_value)
+
+# 用最佳超参数训练并预测
+best_svm = svm.SVC(C=best_C, kernel=best_kernel)
+best_svm.fit(x_train_cnt, y_train)
+svm_pred = best_svm.predict(real_x_cnt)
+
+# 输出
+# ...
+```
+
+
 
 ### （三）LSTM
 

@@ -2,7 +2,7 @@ from loguru import logger
 
 from config import *
 from preprocess import preprocess
-from train import naive_bayes_train, lstm_train
+from train import naive_bayes_train, lstm_train, svm_train
 from train import bert_train
 
 
@@ -15,14 +15,13 @@ def naive_bayes():
 # 支持向量机
 def svm():
     logger.info('Model: SVM')
-    # todo
+    svm_train()
 
 
 # LSTM
 def lstm():
     logger.info('Model: LSTM')
     lstm_train()
-    # todo
 
 
 # Bert
@@ -39,7 +38,7 @@ def main():
     # 调用不同的模型训练、预测
     logger.info('Training model...')
     # naive_bayes()
-    # svm()
+    svm()
     lstm()
     bert()
 

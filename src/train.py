@@ -66,6 +66,50 @@ def naive_bayes_train() -> ComplementNB:
 SVM
 """
 
+from sklearn import svm
+from sklearn.metrics import accuracy_score
+def svm_train():
+    # Optuna 调参
+    def objective(trial):
+        C = trial.suggest_loguniform('C', 0.1, 10.0)
+        kernel = trial.suggest_categorical('kernel', ['linear', 'rbf', 'poly', 'sigmoid'])
+        model = svm.SVC(C=C, kernel=kernel)
+        model.fit(x_train_cnt, y_train)
+        y_pred = model.predict(x_test_cnt)
+        accuracy = accuracy_score(y_test, y_pred)
+        return accuracy
+
+    # 读取数据
+    df_train = read_data_cleaned(data_train_path)
+    df_test = read_data_cleaned(data_test_path)
+
+    x, y = split_content_label(df_train)
+    x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.2)
+    x_real = df_test['content']
+
+    # 将文本数据转换为词袋模型的表示形式，即将文本转换为词频矩阵
+    cv = CountVectorizer()
+    x_train_cnt = cv.fit_transform(x_train.values)
+    x_test_cnt = cv.transform(x_test.values)
+    real_x_cnt = cv.transform(x_real.values)
+
+    # 创建 Optuna 优化对象
+    study = optuna.create_study(direction='maximize')
+    study.optimize(objective, n_trials=300)
+
+    # 输出最佳超参数值
+    best_C = study.best_params['C']
+    best_kernel = study.best_params['kernel']
+    best_test_value = study.best_value
+    print('best C: ', best_C)
+    print('best kernel: ', best_kernel)
+    print('best test value: ', best_test_value)
+
+    # 用最佳超参数训练并预测
+    best_svm = svm.SVC(C=best_C, kernel=best_kernel)
+    best_svm.fit(x_train_cnt, y_train)
+    svm_pred = best_svm.predict(real_x_cnt)
+
 """
 LSTM
 """
